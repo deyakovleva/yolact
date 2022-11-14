@@ -427,7 +427,6 @@ class Yolact(nn.Module):
             if cfg.mask_proto_bias:
                 cfg.mask_dim += 1
 
-
         self.selected_layers = cfg.backbone.selected_layers
         src_channels = self.backbone.channels
 

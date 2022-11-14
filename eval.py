@@ -12,6 +12,7 @@ from data import cfg, set_cfg, set_dataset
 
 import numpy as np
 import torch
+from torchvision import io
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 import argparse
@@ -113,9 +114,8 @@ def parse_args(argv=None):
                         help='When displaying / saving video, draw the FPS on the frame')
     parser.add_argument('--emulate_playback', default=False, dest='emulate_playback', action='store_true',
                         help='When saving a video, emulate the framerate that you\'d get running in real-time mode.')
-
     parser.set_defaults(no_bar=False, display=False, resume=False, output_coco_json=False, output_web_json=False, shuffle=False,
-                        benchmark=False, no_sort=False, no_hash=False, mask_proto_debug=False, crop=True, detect=False, display_fps=False,
+                        benchmark=False, no_sort=False, no_hash=False, mask_proto_debug=True, crop=True, detect=False, display_fps=False,
                         emulate_playback=False)
 
     global args
@@ -157,7 +157,15 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
         if cfg.eval_mask_branch:
             # Masks are drawn on the GPU, so don't copy
             masks = t[3][idx]
+            
         classes, scores, boxes = [x[idx].cpu().numpy() for x in t[:3]]
+
+        with open(f'boxes.txt', 'a') as file:
+            for j in range(len(classes)):
+                # file.write(str(j) + ' ' + np.array2string(boxes[j]) + '\n')
+                file.write(str(j) + ' ' + ' '.join(map(str, boxes[j])) + '\n')
+  
+
 
     num_dets_to_consider = min(args.top_k, classes.shape[0])
     for j in range(num_dets_to_consider):
@@ -189,6 +197,23 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
     if args.display_masks and cfg.eval_mask_branch and num_dets_to_consider > 0:
         # After this, mask is of size [num_dets, h, w, 1]
         masks = masks[:num_dets_to_consider, :, :, None]
+
+        mask_out = (masks.sum(dim=0) >= 1).float().expand(-1, -1, 3).contiguous()  
+        mask_out_1 = mask_out.cpu().numpy()
+
+        indices = np.where(mask_out_1[:,:,:]==1)
+        
+        x = indices[0][:]
+        y = indices[1][:]
+
+        print('x')
+        print(x)
+
+        with open(f'masks_x.txt', 'a') as file:
+            for j in range(len(x)):
+                file.write(str(j) + ' ' )
+        print('y')
+        print(y)
         
         # Prepare the RGB images for each mask given their color (size [num_dets, h, w, 1])
         colors = torch.cat([get_color(j, on_gpu=img_gpu.device.index).view(1, 1, 1, 3) for j in range(num_dets_to_consider)], dim=0)
@@ -282,6 +307,7 @@ def prep_benchmark(dets_out, h, w):
 
 def prep_coco_cats():
     """ Prepare inverted table for category id lookup given a coco cats object. """
+    print('Prepairing coco cats')
     for coco_cat_id, transformed_cat_id_p1 in get_label_map().items():
         transformed_cat_id = transformed_cat_id_p1 - 1
         coco_cats[transformed_cat_id] = coco_cat_id
@@ -289,6 +315,7 @@ def prep_coco_cats():
 
 
 def get_coco_cat(transformed_cat_id):
+    print(coco_cats)
     """ transformed_cat_id is [0,80) as indices in cfg.dataset.class_names """
     return coco_cats[transformed_cat_id]
 
@@ -328,6 +355,18 @@ class Detections:
             'segmentation': rle,
             'score': float(score)
         })
+
+    def add_mask_v2(self, image_id:int, category_id:int, segmentation:np.ndarray, score:float):
+        """ The segmentation should be the full mask, the size of the image and with size [h, w]. """
+        # rle = pycocotools.mask.encode(np.asfortranarray(segmentation.astype(np.uint8)))
+        # rle['counts'] = rle['counts'].decode('ascii') # json.dump doesn't like bytes strings
+
+        self.mask_data.append({
+            'image_id': int(image_id),
+            'category_id': get_coco_cat(int(category_id)),
+            'segmentation': segmentation.tolist(),
+            'score': float(score)
+        })
     
     def dump(self):
         dump_arguments = [
@@ -336,6 +375,8 @@ class Detections:
         ]
 
         for data, path in dump_arguments:
+            print('dump!!!!!!!!!!!!!!!!!!')
+            print(path)
             with open(path, 'w') as f:
                 json.dump(data, f)
     
@@ -366,7 +407,8 @@ class Detections:
                 'category': cfg.dataset.class_names[get_transformed_cat(bbox['category_id'])],
                 'mask': mask['segmentation'],
             })
-
+        print('dumpweb!!!!!!!!!!!!!!!!!!')
+        print(os.path.join(args.web_det_path, '%s.json' % cfg.name))
         with open(os.path.join(args.web_det_path, '%s.json' % cfg.name), 'w') as f:
             json.dump(output, f)
         
@@ -596,6 +638,27 @@ def evalimage(net:Yolact, path:str, save_path:str=None):
     frame = torch.from_numpy(cv2.imread(path)).cuda().float()
     batch = FastBaseTransform()(frame.unsqueeze(0))
     preds = net(batch)
+    # print('!!!!!!!!!!!!!!!!preds')
+    dets = preds[0].get('detection')
+    # print(dets)
+    box_img = dets.get('box')
+    mask_img = dets.get('mask')
+    class_img = dets.get('class')
+    score_img = dets.get('score')
+
+    box_img_numpy = box_img.cpu().numpy()
+    mask_img_numpy = mask_img.cpu().numpy()
+    class_img_numpy = class_img.cpu().numpy()
+    # print(mask_img_numpy)
+    score_img_numpy = score_img.cpu().numpy()
+    # print(class_img..cpu().numpy())
+    detections_img = Detections()
+    for i in range(len(class_img)):
+        detections_img.add_mask_v2(i, class_img_numpy[i], mask_img_numpy[i], score_img_numpy[i])
+        detections_img.add_bbox(i, class_img_numpy[i], box_img_numpy[i], score_img_numpy[i])
+
+    detections_img.dump()
+
 
     img_numpy = prep_display(preds, frame, None, None, undo_transform=False)
     
@@ -937,6 +1000,7 @@ def evaluate(net:Yolact, dataset, train_mode=False):
 
                 # Test flag, do not upvote
                 if cfg.mask_proto_debug:
+                    print('!!!!!!!!!!!!!!!!!!!!!!!!!!mask_proto_debug')
                     with open('scripts/info.txt', 'w') as f:
                         f.write(str(dataset.ids[image_idx]))
                     np.save('scripts/gt.npy', gt_masks)
@@ -975,9 +1039,8 @@ def evaluate(net:Yolact, dataset, train_mode=False):
                     % (repr(progress_bar), it+1, dataset_size, progress, fps), end='')
 
 
-
         if not args.display and not args.benchmark:
-            print()
+            print('not display not bench')
             if args.output_coco_json:
                 print('Dumping detections...')
                 if args.output_web_json:
@@ -1091,6 +1154,7 @@ if __name__ == '__main__':
                                     transform=BaseTransform(), has_gt=cfg.dataset.has_gt)
             prep_coco_cats()
         else:
+            prep_coco_cats()
             dataset = None        
 
         print('Loading model...', end='')

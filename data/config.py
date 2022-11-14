@@ -117,7 +117,7 @@ dataset_base = Config({
     'valid_info':   'path_to_annotation_file',
 
     # Whether or not to load GT. If this is False, eval.py quantitative evaluation won't work.
-    'has_gt': True,
+    'has_gt': False,
 
     # A list of names for each of you classes.
     'class_names': COCO_CLASSES,
@@ -126,6 +126,19 @@ dataset_base = Config({
     # provide a map from category_id -> index in class_names + 1 (the +1 is there because it's 1-indexed).
     # If not specified, this just assumes category ids start at 1 and increase sequentially.
     'label_map': None
+})
+
+my_custom_dataset = dataset_base.copy({
+    'name': 'Gauge Instanse Dataset',
+
+    'train_images': '/home/human/Diana_Iakovleva/datasets/meter_instance_seg/val/',
+    'train_info':   '/home/human/Diana_Iakovleva/datasets/meter_instance_seg/annotations/instances_val.json',
+
+    'valid_images': '/home/human/Diana_Iakovleva/datasets/meter_instance_seg/val/',
+    'valid_info':   '/home/human/Diana_Iakovleva/datasets/meter_instance_seg/annotations/instances_val.json',
+
+    'has_gt': False,
+    'class_names': ('manometer', 'needle')
 })
 
 coco2014_dataset = dataset_base.copy({
@@ -209,7 +222,7 @@ darknet_transform = Config({
 
 backbone_base = Config({
     'name': 'Base Backbone',
-    'path': 'path/to/pretrained/weights',
+    'path': 'yolact_base_54_800000.pth',
     'type': object,
     'args': tuple(),
     'transform': resnet_transform,
@@ -657,8 +670,8 @@ yolact_base_config = coco_base_config.copy({
     'name': 'yolact_base',
 
     # Dataset stuff
-    'dataset': coco2017_dataset,
-    'num_classes': len(coco2017_dataset.class_names) + 1,
+    'dataset': my_custom_dataset,
+    'num_classes': len(my_custom_dataset.class_names) + 1,
 
     # Image Size
     'max_size': 550,
